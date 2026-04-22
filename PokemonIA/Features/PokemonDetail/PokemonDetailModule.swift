@@ -127,11 +127,11 @@ final class PokemonDetailViewModel: ObservableObject {
         Task {
             do {
                 let detail = try await getDetailUseCase.execute(id: id)
-                withAnimation(.spring()) {
-                    self.state = .loaded(detail)
+                withAnimation(.easeInOut(duration: 0.4)) {
+                    state = .loaded(detail)
                 }
             } catch {
-                self.state = .error(error.localizedDescription)
+                state = .error(error.localizedDescription)
             }
         }
     }
@@ -142,18 +142,46 @@ final class PokemonDetailViewModel: ObservableObject {
 struct PokemonDetailView: View {
 
     @StateObject var viewModel: PokemonDetailViewModel
+    @AppStorage("isDarkMode") private var isDarkMode = false
+
+    @State private var showImage = false
+    @State private var showTitle = false
+    @State private var showTypes = false
+    @State private var showStats = false
+
     let name: String
 
-    private let pastelGreen = Color(red: 0.80, green: 0.93, blue: 0.85)
+    private var lightBackground: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color.white,
+                Color(red: 0.93, green: 0.94, blue: 0.97)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    private var darkBackground: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color(red: 0.08, green: 0.09, blue: 0.12),
+                Color(red: 0.15, green: 0.17, blue: 0.22)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
 
     var body: some View {
         ZStack {
-            pastelGreen.opacity(0.4)
+
+            (isDarkMode ? darkBackground : lightBackground)
                 .ignoresSafeArea()
 
             content
         }
-        .navigationTitle(name)
+        .preferredColorScheme(isDarkMode ? .dark : .light)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             viewModel.onAppear()
@@ -162,42 +190,42 @@ struct PokemonDetailView: View {
 
     @ViewBuilder
     private var content: some View {
+
         switch viewModel.state {
 
         case .idle, .loading:
-            ProgressView("Cargando...")
-                .scaleEffect(1.3)
+            ProgressView()
+                .scaleEffect(1.4)
 
         case .error(let message):
-            VStack(spacing: 16) {
+            VStack {
                 Text("Error")
-                    .font(.title2)
                 Text(message)
-                Button("Reintentar") {
-                    viewModel.onAppear()
-                }
             }
 
         case .loaded(let model):
+
             ScrollView {
-                VStack(spacing: 24) {
+                VStack(spacing: 30) {
+
+                    Spacer(minLength: 30)
 
                     AsyncImage(url: model.imageURL) { phase in
                         switch phase {
                         case .empty:
                             ProgressView()
-                                .frame(height: 150)
+                                .frame(height: 180)
 
                         case .success(let image):
                             image
                                 .resizable()
                                 .scaledToFit()
-                                .frame(height: 180)
-                                .scaleEffect(1.1)
-                                .transition(.scale)
+                                .frame(height: 200)
+                                .scaleEffect(showImage ? 1 : 0.6)
+                                .opacity(showImage ? 1 : 0)
 
                         case .failure:
-                            Image(systemName: "questionmark.circle")
+                            Image(systemName: "questionmark")
 
                         @unknown default:
                             EmptyView()
@@ -205,34 +233,79 @@ struct PokemonDetailView: View {
                     }
 
                     Text("#\(model.id)")
-                        .font(.headline)
+                        .font(.subheadline)
                         .foregroundColor(.gray)
+                        .opacity(showTitle ? 1 : 0)
+                        .offset(y: showTitle ? 0 : 10)
 
                     Text(model.name)
-                        .font(.largeTitle)
-                        .bold()
+                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                        .multilineTextAlignment(.center)
+                        .opacity(showTitle ? 1 : 0)
+                        .offset(y: showTitle ? 0 : 10)
 
-                    HStack(spacing: 12) {
+                    HStack(spacing: 14) {
                         ForEach(model.types, id: \.self) { type in
                             Text(type)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color.white)
-                                .cornerRadius(12)
-                                .shadow(radius: 3)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 20)
+                                        .fill(isDarkMode ? Color.white.opacity(0.1) : Color.white)
+                                )
                         }
                     }
+                    .opacity(showTypes ? 1 : 0)
+                    .offset(y: showTypes ? 0 : 15)
 
-                    VStack(spacing: 8) {
+                    VStack(spacing: 12) {
                         Text("Altura: \(String(format: "%.1f", model.height)) m")
                         Text("Peso: \(String(format: "%.1f", model.weight)) kg")
                     }
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(isDarkMode ? .white : .black)
                     .padding()
-                    .background(Color.white)
-                    .cornerRadius(16)
-                    .shadow(radius: 4)
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        RoundedRectangle(cornerRadius: 25)
+                            .fill(isDarkMode ? Color.white.opacity(0.08) : Color.white)
+                    )
+                    .padding(.horizontal, 40)
+                    .shadow(color: .black.opacity(isDarkMode ? 0.4 : 0.08), radius: 15, y: 8)
+                    .opacity(showStats ? 1 : 0)
+                    .offset(y: showStats ? 0 : 20)
+
+                    Spacer(minLength: 40)
                 }
-                .padding()
+                .frame(maxWidth: .infinity)
+                .onAppear {
+                    showImage = false
+                    showTitle = false
+                    showTypes = false
+                    showStats = false
+
+                    withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                        showImage = true
+                    }
+
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        withAnimation(.easeOut(duration: 0.4)) {
+                            showTitle = true
+                        }
+                    }
+
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        withAnimation(.easeOut(duration: 0.4)) {
+                            showTypes = true
+                        }
+                    }
+
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        withAnimation(.easeOut(duration: 0.4)) {
+                            showStats = true
+                        }
+                    }
+                }
             }
         }
     }
