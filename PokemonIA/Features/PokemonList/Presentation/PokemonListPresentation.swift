@@ -3,7 +3,7 @@ import Combine
 
 // MARK: - View state
 
-enum PokemonListViewState: Equatable {
+enum PokemonListViewState {
     case idle
     case loading
     case loaded
@@ -19,10 +19,10 @@ final class PokemonListViewModel: ObservableObject {
     @Published var state: PokemonListViewState = .idle
     @Published var pokemons: [PokemonSummary] = []
     @Published var currentPage: Int = 0
-    @Published var pageSize: Int = 20
-    @Published var isLoadingPage: Bool = false
+    @Published var slideDirection: Edge = .trailing
 
-    private let maxPagesToDemo = 3
+    private let maxPages = 3
+    private let pageSize = 20
     private let getPokemonPageUseCase: GetPokemonPageUseCase
 
     init(getPokemonPageUseCase: GetPokemonPageUseCase) {
@@ -35,187 +35,231 @@ final class PokemonListViewModel: ObservableObject {
         }
     }
 
-    func reload() {
-        pokemons = []
-        currentPage = 0
-        loadPage(page: 0)
+    func nextPage() {
+        guard currentPage + 1 < maxPages else { return }
+        slideDirection = .trailing
+        loadPage(page: currentPage + 1)
     }
 
-    func loadNextPageIfNeeded(currentItem item: PokemonSummary?) {
-        guard let item = item else { return }
-        guard let index = pokemons.firstIndex(where: { $0.id == item.id }) else { return }
-
-        let thresholdIndex = pokemons.index(pokemons.endIndex, offsetBy: -5)
-        if index >= thresholdIndex {
-            loadNextPage()
-        }
+    func previousPage() {
+        guard currentPage > 0 else { return }
+        slideDirection = .leading
+        loadPage(page: currentPage - 1)
     }
 
-    func loadNextPage() {
-        guard !isLoadingPage else { return }
-        guard currentPage + 1 < maxPagesToDemo else { return }
-        loadPage(page: currentPage + 1, append: true)
-    }
-
-    private func loadPage(page: Int, append: Bool = false) {
+    private func loadPage(page: Int) {
         state = .loading
-        isLoadingPage = true
 
         Task {
             do {
                 let newPage = try await getPokemonPageUseCase.execute(page: page, pageSize: pageSize)
 
-                if append {
-                    self.pokemons.append(contentsOf: newPage)
-                } else {
-                    self.pokemons = newPage
-                }
-
-                self.currentPage = page
-                if self.pokemons.isEmpty {
-                    self.state = .empty
-                } else {
-                    self.state = .loaded
+                withAnimation(.easeInOut(duration: 0.35)) {
+                    pokemons = newPage
+                    currentPage = page
+                    state = newPage.isEmpty ? .empty : .loaded
                 }
             } catch {
-                let message: String
-                if let networkError = error as? NetworkError {
-                    message = networkError.localizedDescription
-                } else {
-                    message = error.localizedDescription
-                }
-                self.state = .error(message)
+                state = .error(error.localizedDescription)
             }
-            self.isLoadingPage = false
         }
     }
 }
 
-// MARK: - SwiftUI View
+// MARK: - View
 
 struct PokemonListView: View {
+
     @StateObject var viewModel: PokemonListViewModel
+    @State private var leftPressed = false
+    @State private var rightPressed = false
+
+    // Premium green gradient
+    private let backgroundGradient = LinearGradient(
+        colors: [
+            Color(red: 0.40, green: 0.75, blue: 0.55),
+            Color(red: 0.85, green: 0.97, blue: 0.92)
+        ],
+        startPoint: .top,
+        endPoint: .bottom
+    )
 
     var body: some View {
-        NavigationStack {
-            content
-                .navigationTitle("Pokémon")
-                .toolbar {
-                    ToolbarItem(placement: .principal) {
-                        VStack {
-                            Text("Pokémon")
-                                .font(.headline)
-                            Text("Página \(viewModel.currentPage + 1) de 3")
-                                .font(.caption)
-                        }
-                    }
-                }
+        ZStack {
+
+            backgroundGradient
+                .ignoresSafeArea()
+
+            // Subtle Pokéball watermark
+            Image(systemName: "circle.circle")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 350)
+                .foregroundColor(.white.opacity(0.05))
+                .offset(y: 200)
+
+            VStack(spacing: 0) {
+
+                Text("Pokédex")
+                    .font(.system(size: 38, weight: .bold, design: .rounded))
+                    .padding(.top, 20)
+                    .padding(.bottom, 10)
+
+                content
+                    .transition(.move(edge: viewModel.slideDirection))
+
+                paginationBar
+            }
         }
         .onAppear {
             viewModel.onAppear()
         }
     }
 
+    // MARK: - Content
+
     @ViewBuilder
     private var content: some View {
+
         switch viewModel.state {
+
         case .idle, .loading:
-            ProgressView("Cargando...")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Spacer()
+            ProgressView()
+                .scaleEffect(1.4)
+            Spacer()
 
         case .empty:
-            VStack(spacing: 12) {
-                Text("No hay resultados")
-                    .font(.headline)
-                Button("Reintentar") {
-                    viewModel.reload()
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Spacer()
+            Text("No hay resultados")
+            Spacer()
 
         case .error(let message):
-            VStack(spacing: 12) {
-                Text("Ha ocurrido un error")
-                    .font(.headline)
+            Spacer()
+            VStack {
+                Text("Error")
                 Text(message)
-                    .font(.footnote)
-                    .multilineTextAlignment(.center)
-                Button("Reintentar") {
-                    viewModel.reload()
-                }
             }
-            .padding()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Spacer()
 
         case .loaded:
-            listView
+            ScrollView {
+                LazyVStack(spacing: 20) {
+                    ForEach(viewModel.pokemons, id: \.id) { pokemon in
+                        NavigationLink {
+                            PokemonDetailViewFactory.make(id: pokemon.id, name: pokemon.name)
+                        } label: {
+                            PokemonRowView(pokemon: pokemon)
+                                .padding()
+                                .background(.ultraThinMaterial)
+                                .cornerRadius(24)
+                                .shadow(color: .black.opacity(0.15), radius: 10, y: 6)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 24)
+                                        .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                                )
+                                .padding(.horizontal)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.top)
+                .padding(.bottom, 40)
+            }
         }
     }
 
-    private var listView: some View {
-        List {
-            ForEach(viewModel.pokemons, id: \.id) { pokemon in
-                NavigationLink {
-                    PokemonDetailViewFactory.make(id: pokemon.id, name: pokemon.name)
-                } label: {
-                    PokemonRowView(pokemon: pokemon)
-                        .onAppear {
-                            viewModel.loadNextPageIfNeeded(currentItem: pokemon)
-                        }
-                }
-            }
+    // MARK: - Pagination Bar (Floating Capsule)
 
-            if viewModel.isLoadingPage {
-                HStack {
-                    Spacer()
-                    ProgressView()
-                    Spacer()
+    private var paginationBar: some View {
+        HStack(spacing: 50) {
+
+            Button {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.5)) {
+                    leftPressed = true
                 }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    leftPressed = false
+                }
+                viewModel.previousPage()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.title2.weight(.bold))
+                    .scaleEffect(leftPressed ? 0.7 : 1)
             }
+            .disabled(viewModel.currentPage == 0)
+            .opacity(viewModel.currentPage == 0 ? 0.3 : 1)
+
+            Button {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.5)) {
+                    rightPressed = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    rightPressed = false
+                }
+                viewModel.nextPage()
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.title2.weight(.bold))
+                    .scaleEffect(rightPressed ? 0.7 : 1)
+            }
+            .disabled(viewModel.currentPage == 2)
+            .opacity(viewModel.currentPage == 2 ? 0.3 : 1)
         }
-        .listStyle(.plain)
+        .padding(.vertical, 14)
+        .padding(.horizontal, 50)
+        .background(.ultraThinMaterial)
+        .clipShape(Capsule())
+        .shadow(color: .black.opacity(0.2), radius: 15, y: 8)
+        .padding(.bottom, 30)
     }
 }
 
 // MARK: - Row
 
 struct PokemonRowView: View {
+
     let pokemon: PokemonSummary
 
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 18) {
+
             AsyncImage(url: pokemon.imageURL) { phase in
                 switch phase {
                 case .empty:
                     ProgressView()
-                        .frame(width: 56, height: 56)
+                        .frame(width: 75, height: 75)
+
                 case .success(let image):
                     image
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 56, height: 56)
+                        .frame(width: 75, height: 75)
+                        .transition(.scale)
+
                 case .failure:
-                    Image(systemName: "questionmark.square")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 56, height: 56)
-                        .foregroundColor(.gray)
+                    Image(systemName: "questionmark")
+
                 @unknown default:
                     EmptyView()
                 }
             }
-            Text("#\(pokemon.id)")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-            Text(pokemon.name)
-                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(pokemon.name)
+                    .font(.system(size: 22, weight: .semibold))
+
+                Text("#\(pokemon.id)")
+                    .font(.subheadline)
+                    .foregroundColor(.gray)
+            }
+
             Spacer()
         }
-        .padding(.vertical, 4)
     }
 }
 
-// MARK: - Factory para inyección de dependencias
+// MARK: - Factory
 
 enum PokemonListViewFactory {
     static func make() -> some View {
@@ -223,6 +267,9 @@ enum PokemonListViewFactory {
         let repository = RemotePokemonListRepository(client: client)
         let useCase = DefaultGetPokemonPageUseCase(repository: repository)
         let viewModel = PokemonListViewModel(getPokemonPageUseCase: useCase)
-        return PokemonListView(viewModel: viewModel)
+
+        return NavigationStack {
+            PokemonListView(viewModel: viewModel)
+        }
     }
 }

@@ -37,8 +37,8 @@ struct PokemonDetailModel {
     let name: String
     let imageURL: URL?
     let types: [String]
-    let height: Double // metros
-    let weight: Double // kg
+    let height: Double
+    let weight: Double
 }
 
 protocol PokemonDetailRepository {
@@ -46,6 +46,7 @@ protocol PokemonDetailRepository {
 }
 
 final class RemotePokemonDetailRepository: PokemonDetailRepository {
+
     private let client: HTTPClient
     private let baseURL = URL(string: "https://pokeapi.co/api/v2")!
 
@@ -62,17 +63,13 @@ final class RemotePokemonDetailRepository: PokemonDetailRepository {
             .sorted { $0.slot < $1.slot }
             .map { $0.type.name.capitalized }
 
-        // La API devuelve altura en decímetros y peso en hectogramos.
-        let heightMeters = Double(dto.height) / 10.0
-        let weightKg = Double(dto.weight) / 10.0
-
         return PokemonDetailModel(
             id: dto.id,
             name: dto.name.capitalized,
             imageURL: imageURL,
             types: types,
-            height: heightMeters,
-            weight: weightKg
+            height: Double(dto.height) / 10,
+            weight: Double(dto.weight) / 10
         )
     }
 }
@@ -84,6 +81,7 @@ protocol GetPokemonDetailUseCase {
 }
 
 final class DefaultGetPokemonDetailUseCase: GetPokemonDetailUseCase {
+
     private let repository: PokemonDetailRepository
 
     init(repository: PokemonDetailRepository) {
@@ -106,6 +104,7 @@ enum PokemonDetailViewState {
 
 @MainActor
 final class PokemonDetailViewModel: ObservableObject {
+
     @Published var state: PokemonDetailViewState = .idle
 
     private let id: Int
@@ -122,26 +121,17 @@ final class PokemonDetailViewModel: ObservableObject {
         }
     }
 
-    func retry() {
-        load()
-    }
-
     private func load() {
         state = .loading
 
         Task {
             do {
                 let detail = try await getDetailUseCase.execute(id: id)
-                self.state = .loaded(detail)
-            } catch {
-                let message: String
-                if let networkError = error as? NetworkError {
-                    message = networkError.localizedDescription
-                } else {
-                    message = error.localizedDescription
+                withAnimation(.spring()) {
+                    self.state = .loaded(detail)
                 }
-                // Requisito: error controlado, sin crash, con opción de reintento
-                self.state = .error(message)
+            } catch {
+                self.state = .error(error.localizedDescription)
             }
         }
     }
@@ -150,98 +140,100 @@ final class PokemonDetailViewModel: ObservableObject {
 // MARK: - View
 
 struct PokemonDetailView: View {
+
     @StateObject var viewModel: PokemonDetailViewModel
     let name: String
 
+    private let pastelGreen = Color(red: 0.80, green: 0.93, blue: 0.85)
+
     var body: some View {
-        content
-            .navigationTitle(name)
-            .navigationBarTitleDisplayMode(.inline)
-            .onAppear {
-                viewModel.onAppear()
-            }
+        ZStack {
+            pastelGreen.opacity(0.4)
+                .ignoresSafeArea()
+
+            content
+        }
+        .navigationTitle(name)
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            viewModel.onAppear()
+        }
     }
 
     @ViewBuilder
     private var content: some View {
         switch viewModel.state {
+
         case .idle, .loading:
-            VStack {
-                Spacer()
-                ProgressView("Cargando detalle...")
-                Spacer()
-            }
+            ProgressView("Cargando...")
+                .scaleEffect(1.3)
 
         case .error(let message):
-            VStack(spacing: 12) {
-                Text("No se pudo cargar el detalle")
-                    .font(.headline)
+            VStack(spacing: 16) {
+                Text("Error")
+                    .font(.title2)
                 Text(message)
-                    .font(.footnote)
-                    .multilineTextAlignment(.center)
                 Button("Reintentar") {
-                    viewModel.retry()
+                    viewModel.onAppear()
                 }
             }
-            .padding()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
         case .loaded(let model):
             ScrollView {
-                VStack(spacing: 16) {
+                VStack(spacing: 24) {
+
                     AsyncImage(url: model.imageURL) { phase in
                         switch phase {
                         case .empty:
                             ProgressView()
-                                .frame(width: 120, height: 120)
+                                .frame(height: 150)
+
                         case .success(let image):
                             image
                                 .resizable()
                                 .scaledToFit()
-                                .frame(width: 160, height: 160)
+                                .frame(height: 180)
+                                .scaleEffect(1.1)
+                                .transition(.scale)
+
                         case .failure:
                             Image(systemName: "questionmark.circle")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 120, height: 120)
-                                .foregroundColor(.gray)
+
                         @unknown default:
                             EmptyView()
                         }
                     }
 
-                    Text("#\(model.id) \(model.name)")
-                        .font(.title2)
+                    Text("#\(model.id)")
+                        .font(.headline)
+                        .foregroundColor(.gray)
+
+                    Text(model.name)
+                        .font(.largeTitle)
                         .bold()
 
-                    if !model.types.isEmpty {
-                        HStack(spacing: 8) {
-                            ForEach(model.types, id: \.self) { type in
-                                Text(type)
-                                    .font(.caption)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(Color.blue.opacity(0.1))
-                                    .cornerRadius(8)
-                            }
+                    HStack(spacing: 12) {
+                        ForEach(model.types, id: \.self) { type in
+                            Text(type)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.white)
+                                .cornerRadius(12)
+                                .shadow(radius: 3)
                         }
                     }
 
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(spacing: 8) {
                         Text("Altura: \(String(format: "%.1f", model.height)) m")
                         Text("Peso: \(String(format: "%.1f", model.weight)) kg")
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 8)
-
-                    Spacer()
+                    .padding()
+                    .background(Color.white)
+                    .cornerRadius(16)
+                    .shadow(radius: 4)
                 }
                 .padding()
-                .frame(maxWidth: .infinity)
             }
-
-        case .idle:
-            EmptyView()
         }
     }
 }
@@ -249,11 +241,13 @@ struct PokemonDetailView: View {
 // MARK: - Factory
 
 enum PokemonDetailViewFactory {
+
     static func make(id: Int, name: String) -> some View {
         let client = URLSessionHTTPClient()
         let repository = RemotePokemonDetailRepository(client: client)
         let useCase = DefaultGetPokemonDetailUseCase(repository: repository)
         let viewModel = PokemonDetailViewModel(id: id, getDetailUseCase: useCase)
+
         return PokemonDetailView(viewModel: viewModel, name: name)
     }
 }
