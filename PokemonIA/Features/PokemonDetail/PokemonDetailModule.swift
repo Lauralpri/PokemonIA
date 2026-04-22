@@ -121,6 +121,10 @@ final class PokemonDetailViewModel: ObservableObject {
         }
     }
 
+    func retry() {
+        load()
+    }
+
     private func load() {
         state = .loading
 
@@ -143,6 +147,8 @@ struct PokemonDetailView: View {
 
     @StateObject var viewModel: PokemonDetailViewModel
     @AppStorage("isDarkMode") private var isDarkMode = false
+
+    let namespace: Namespace.ID
 
     @State private var showImage = false
     @State private var showTitle = false
@@ -198,10 +204,31 @@ struct PokemonDetailView: View {
                 .scaleEffect(1.4)
 
         case .error(let message):
-            VStack {
+            VStack(spacing: 16) {
                 Text("Error")
+                    .font(.title2)
+                    .bold()
+
                 Text(message)
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(.secondary)
+
+                Button {
+                    viewModel.retry()
+                } label: {
+                    Text("Reintentar")
+                        .font(.system(size: 16, weight: .semibold))
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 20)
+                                .fill(isDarkMode ? Color.white.opacity(0.1) : Color.black)
+                        )
+                        .foregroundColor(isDarkMode ? .white : .white)
+                }
+                .padding(.top, 8)
             }
+            .padding()
 
         case .loaded(let model):
 
@@ -221,6 +248,7 @@ struct PokemonDetailView: View {
                                 .resizable()
                                 .scaledToFit()
                                 .frame(height: 200)
+                                .matchedGeometryEffect(id: model.id, in: namespace)
                                 .scaleEffect(showImage ? 1 : 0.6)
                                 .opacity(showImage ? 1 : 0)
 
@@ -315,12 +343,14 @@ struct PokemonDetailView: View {
 
 enum PokemonDetailViewFactory {
 
-    static func make(id: Int, name: String) -> some View {
+    static func make(id: Int, name: String, namespace: Namespace.ID) -> some View {
         let client = URLSessionHTTPClient()
         let repository = RemotePokemonDetailRepository(client: client)
         let useCase = DefaultGetPokemonDetailUseCase(repository: repository)
         let viewModel = PokemonDetailViewModel(id: id, getDetailUseCase: useCase)
 
-        return PokemonDetailView(viewModel: viewModel, name: name)
+        return PokemonDetailView(viewModel: viewModel,
+                                 namespace: namespace,
+                                 name: name)
     }
 }

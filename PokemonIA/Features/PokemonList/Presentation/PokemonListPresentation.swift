@@ -35,6 +35,10 @@ final class PokemonListViewModel: ObservableObject {
         }
     }
 
+    func retry() {
+        loadPage(page: currentPage)
+    }
+
     func nextPage() {
         guard currentPage + 1 < maxPages else { return }
         slideDirection = .trailing
@@ -72,6 +76,7 @@ struct PokemonListView: View {
 
     @StateObject var viewModel: PokemonListViewModel
     @AppStorage("isDarkMode") private var isDarkMode = false
+    @Namespace private var heroNamespace
 
     // Premium neutral gradient (light)
     private var lightGradient: LinearGradient {
@@ -164,10 +169,30 @@ struct PokemonListView: View {
 
         case .error(let message):
             Spacer()
-            VStack {
+            VStack(spacing: 16) {
                 Text("Error")
+                    .font(.title2)
+                    .bold()
+
                 Text(message)
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(.secondary)
+
+                Button {
+                    viewModel.retry()
+                } label: {
+                    Text("Reintentar")
+                        .font(.system(size: 16, weight: .semibold))
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 20)
+                                .fill(isDarkMode ? Color.white.opacity(0.1) : Color.black)
+                        )
+                        .foregroundColor(.white)
+                }
             }
+            .padding()
             Spacer()
 
         case .loaded:
@@ -175,10 +200,18 @@ struct PokemonListView: View {
                 LazyVStack(spacing: 18) {
                     ForEach(viewModel.pokemons, id: \.id) { pokemon in
                         NavigationLink {
-                            PokemonDetailViewFactory.make(id: pokemon.id, name: pokemon.name)
+                            PokemonDetailViewFactory.make(
+                                id: pokemon.id,
+                                name: pokemon.name,
+                                namespace: heroNamespace
+                            )
                         } label: {
-                            PokemonRowView(pokemon: pokemon, isDarkMode: isDarkMode)
-                                .padding(.horizontal)
+                            PokemonRowView(
+                                pokemon: pokemon,
+                                isDarkMode: isDarkMode,
+                                namespace: heroNamespace
+                            )
+                            .padding(.horizontal)
                         }
                         .buttonStyle(.plain)
                     }
@@ -192,32 +225,48 @@ struct PokemonListView: View {
     // MARK: - Pagination Bar
 
     private var paginationBar: some View {
-        HStack(spacing: 50) {
+        VStack(spacing: 18) {
 
-            Button {
-                viewModel.previousPage()
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.title2.weight(.bold))
+            // Page indicator
+            HStack(spacing: 8) {
+                ForEach(0..<3) { index in
+                    Circle()
+                        .fill(index == viewModel.currentPage ? Color.primary : Color.gray.opacity(0.4))
+                        .frame(width: index == viewModel.currentPage ? 10 : 6,
+                               height: index == viewModel.currentPage ? 10 : 6)
+                        .animation(.easeInOut(duration: 0.2), value: viewModel.currentPage)
+                }
             }
-            .disabled(viewModel.currentPage == 0)
-            .opacity(viewModel.currentPage == 0 ? 0.3 : 1)
+            .padding(.top, 10)
 
-            Button {
-                viewModel.nextPage()
-            } label: {
-                Image(systemName: "chevron.right")
-                    .font(.title2.weight(.bold))
+            HStack(spacing: 50) {
+
+                Button {
+                    viewModel.previousPage()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.title2.weight(.bold))
+                }
+                .disabled(viewModel.currentPage == 0)
+                .opacity(viewModel.currentPage == 0 ? 0.3 : 1)
+
+                Button {
+                    viewModel.nextPage()
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.title2.weight(.bold))
+                }
+                .disabled(viewModel.currentPage == 2)
+                .opacity(viewModel.currentPage == 2 ? 0.3 : 1)
             }
-            .disabled(viewModel.currentPage == 2)
-            .opacity(viewModel.currentPage == 2 ? 0.3 : 1)
+            .padding(.vertical, 14)
+            .padding(.horizontal, 50)
+            .padding(.top, 6)
+            .background(.ultraThinMaterial)
+            .clipShape(Capsule())
+            .shadow(color: .black.opacity(isDarkMode ? 0.5 : 0.15), radius: 15, y: 8)
         }
-        .padding(.vertical, 14)
-        .padding(.horizontal, 50)
-        .background(.ultraThinMaterial)
-        .clipShape(Capsule())
-        .shadow(color: .black.opacity(isDarkMode ? 0.5 : 0.15), radius: 15, y: 8)
-        .padding(.bottom, 30)
+        .padding(.bottom, 40)
     }
 }
 
@@ -227,6 +276,7 @@ struct PokemonRowView: View {
 
     let pokemon: PokemonSummary
     let isDarkMode: Bool
+    let namespace: Namespace.ID
 
     var body: some View {
         HStack(spacing: 18) {
@@ -242,6 +292,7 @@ struct PokemonRowView: View {
                         .resizable()
                         .scaledToFit()
                         .frame(width: 75, height: 75)
+                        .matchedGeometryEffect(id: pokemon.id, in: namespace)
 
                 case .failure:
                     Image(systemName: "questionmark")
